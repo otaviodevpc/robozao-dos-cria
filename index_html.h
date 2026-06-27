@@ -1,3 +1,10 @@
+// Gerado a partir de index.html — interface tatica UNIT-DX9
+// Servida em PROGMEM na rota "/" do WebServer (porta 80).
+#ifndef INDEX_HTML_H
+#define INDEX_HTML_H
+#include <pgmspace.h>
+
+const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -232,3 +239,6 @@
 </script>
 </body>
 </html>
+)rawliteral";
+
+#endif

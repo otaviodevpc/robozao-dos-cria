@@ -2,6 +2,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include "esp_camera.h"
+#include "index_html.h"   // interface tatica em PROGMEM (INDEX_HTML)
 
 // ==========================================
 // CONFIGURAÇÕES DE REDE (HOTSPOT AP)
@@ -15,8 +16,11 @@ IPAddress subnet(255, 255, 255, 0);
 // ==========================================
 // CONFIGURAÇÕES DE HARDWARE (PINOS)
 // ==========================================
-// Motores (L298N) - Atenção ao GPIO 12 no boot!
-#define MOTOR_ESQ_IN1 12
+// Motores (L298N)
+// NOTA: GPIO 12 (MTDI) é strapping pin — se estiver HIGH no boot o ESP32-CAM
+// pode não inicializar. Trocado por GPIO 2. Evite usar 12/15 em saidas que
+// fiquem HIGH durante o boot.
+#define MOTOR_ESQ_IN1 2
 #define MOTOR_ESQ_IN2 13
 #define MOTOR_DIR_IN3 14
 #define MOTOR_DIR_IN4 15
@@ -61,11 +65,8 @@ WebSocketsServer webSocket = WebSocketsServer(82); // Servidor de Comandos
 // ==========================================
 // PÁGINA HTML DA INTERFACE MILITAR
 // ==========================================
-// COLE SEU HTML AQUI! 
-// Lembre-se de configurar o JavaScript na sua página para conectar no WebSocket:
-// var ws = new WebSocket('ws://192.168.4.1:82/');
-// E a tag de imagem do vídeo deve ser: <img src="http://192.168.4.1:81/stream">
-
+// O HTML/CSS/JS completo está em "index_html.h" (const INDEX_HTML[] PROGMEM).
+// O JS conecta sozinho em ws://<host>:82/ e busca o video em :81/stream.
 
 // ==========================================
 // CONTROLE DOS MOTORES
@@ -130,43 +131,33 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t leng
 // HANDLER DO STREAM DE VÍDEO
 // ==========================================
 void stream_handler() {
-  camera_fb_t * fb = NULL;
-  esp_err_t res = ESP_OK;
-  size_t _jpg_buf_len = 0;
-  uint8_t * _jpg_buf = NULL;
-  char * part_buf[64];
-
-  res = streamServer.sendHeader("Access-Control-Allow-Origin", "*");
-  streamServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  streamServer.send(200, "multipart/x-mixed-replace;boundary=123456789000000000000987654321");
-
   WiFiClient client = streamServer.client();
-  
-  while (true) {
-    if (!client.connected()) break;
-    
-    fb = esp_camera_fb_get();
+
+  // Cabecalho HTTP + multipart, escrito direto no socket (sem WebServer.send,
+  // que quebra o boundary do MJPEG no ESP32).
+  String head = "HTTP/1.1 200 OK\r\n";
+  head += "Access-Control-Allow-Origin: *\r\n";
+  head += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+  client.print(head);
+
+  while (client.connected()) {
+    camera_fb_t * fb = esp_camera_fb_get();
     if (!fb) {
-      Serial.println("Falha na captura da câmera");
-      res = ESP_FAIL;
-    } else {
-      _jpg_buf_len = fb->len;
-      _jpg_buf = fb->buf;
+      Serial.println("Falha na captura da camera");
+      continue;
     }
-    
-    if (res == ESP_OK) {
-      size_t hlen = snprintf((char *)part_buf, 64, "--123456789000000000000987654321\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", _jpg_buf_len);
-      res = client.write((const char *)part_buf, hlen) ? ESP_OK : ESP_FAIL;
-    }
-    if (res == ESP_OK) {
-      res = client.write((const char *)_jpg_buf, _jpg_buf_len) ? ESP_OK : ESP_FAIL;
-    }
-    if (res == ESP_OK) {
-      res = client.write("\r\n", 2) ? ESP_OK : ESP_FAIL;
-    }
-    
-    if (fb) esp_camera_fb_return(fb);
-    if (res != ESP_OK) break;
+
+    client.print("--frame\r\n");
+    client.print("Content-Type: image/jpeg\r\n");
+    client.printf("Content-Length: %u\r\n\r\n", fb->len);
+    client.write(fb->buf, fb->len);
+    client.print("\r\n");
+
+    esp_camera_fb_return(fb);
+
+    // cede o processador entre frames: evita estourar o watchdog e deixa os
+    // outros servidores (web/websocket) respirarem.
+    yield();
   }
 }
 
