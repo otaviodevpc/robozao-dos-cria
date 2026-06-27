@@ -267,11 +267,17 @@ IPAddress subnet(255, 255, 255, 0);
  *         GPIO 5,18,19,21-27,32,34-39 (câmera).
  *
  * Teste só dos motores (sem câmera/Wi-Fi): sketch RoboEsteira_Basico.
+ *
+ * IMPORTANTE: o motor DIREITO estava cabeado invertido — no comando "frente"
+ * ele não girava e em "trás" os dois giravam. Em vez de mexer na lógica das
+ * 4 funções de movimento, invertemos aqui os pinos IN3/IN4 do lado direito.
+ * Assim os 4 sentidos ficam corretos de uma vez. (GPIO 15 continua sendo IN3
+ * fisicamente; só a associação no software é que foi trocada.)
  */
 #define MOTOR_ESQ_IN1 14
 #define MOTOR_ESQ_IN2  2
-#define MOTOR_DIR_IN3 15
-#define MOTOR_DIR_IN4 13
+#define MOTOR_DIR_IN3 13   // <- invertido (era GPIO 15) p/ corrigir cabeamento do motor direito
+#define MOTOR_DIR_IN4 15   // <- invertido (era GPIO 13)
 
 // Flash LED
 #define PIN_LANTERNA 4
@@ -383,26 +389,36 @@ void stream_handler() {
   client.print(head);
 
   while (client.connected()) {
-    // ESSENCIAL: Permite que os outros servidores funcionem enquanto o vídeo transmite!
-    server.handleClient();
+    // ESSENCIAL: o stream é um loop infinito que prende o programa aqui dentro.
+    // Sem rodar TODOS os servidores neste laço, o joystick (WebSocket :82) e a
+    // própria página (:80) ficam sem resposta enquanto o vídeo transmite —
+    // foi essa a causa do "joystick travado". webSocket.loop() em especial
+    // precisa rodar a cada iteração para entregar os comandos de movimento.
     webSocket.loop();
+    server.handleClient();
 
     camera_fb_t * fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Falha na captura da camera");
-      delay(100);
+      // sem 'continue' cego: cede o processador para não travar o watchdog
+      // nem segurar o WebSocket caso a câmera engasgue.
+      delay(20);
       continue;
     }
 
-    client.print("--frame\r\n");
-    client.print("Content-Type: image/jpeg\r\n");
-    client.printf("Content-Length: %u\r\n\r\n", fb->len);
-    client.write(fb->buf, fb->len);
-    client.print("\r\n");
+    bool ok = true;
+    ok &= client.print("--frame\r\n") > 0;
+    ok &= client.print("Content-Type: image/jpeg\r\n") > 0;
+    ok &= client.printf("Content-Length: %u\r\n\r\n", fb->len) > 0;
+    ok &= client.write(fb->buf, fb->len) == fb->len;
+    ok &= client.print("\r\n") > 0;
 
     esp_camera_fb_return(fb);
-    
-    // Pequeno delay para ceder o processamento
+
+    // se a escrita falhou, o cliente caiu: sai já em vez de rodar o loop todo
+    if (!ok) break;
+
+    // cede o processador entre frames (mantém WebSocket/HTTP responsivos)
     delay(20);
   }
 }
@@ -413,7 +429,10 @@ void stream_handler() {
 void setup() {
   Serial.begin(115200);
 
-  // Pinos dos Motores
+  // Pinos dos Motores como saída e já em LOW.
+  // GPIO 2 e GPIO 15 são strapping pins: se ficarem flutuando/HIGH no boot
+  // podem gerar ruído nos motores e até atrapalhar o upload. Definir OUTPUT +
+  // LOW logo de cara deixa a ponte H em estado conhecido (parado).
   pinMode(MOTOR_ESQ_IN1, OUTPUT);
   pinMode(MOTOR_ESQ_IN2, OUTPUT);
   pinMode(MOTOR_DIR_IN3, OUTPUT);
