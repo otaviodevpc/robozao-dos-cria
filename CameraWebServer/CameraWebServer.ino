@@ -66,25 +66,42 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .reticle::before{top:50%;left:-10px;right:-10px;height:1px;}
   .reticle::after{left:50%;top:-10px;bottom:-10px;width:1px;}
   /* CONTROL ROW */
-  .controls{width:100%;max-width:520px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;}
+  .controls{
+    width:100%;max-width:520px;display:flex;flex-wrap:wrap;gap:14px;
+    align-items:center;justify-content:center;
+  }
   /* JOYSTICK */
-  .joy-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .joy-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;}
   #joy{
-    width:170px;height:170px;border-radius:50%;
-    background:radial-gradient(circle,rgba(57,255,20,.06),transparent 70%);
-    border:1px solid var(--neon-dim);position:relative;touch-action:none;
+    width:clamp(150px,42vw,220px);height:clamp(150px,42vw,220px);border-radius:50%;
+    background:radial-gradient(circle,rgba(57,255,20,.08),transparent 70%);
+    border:2px solid var(--neon-dim);position:relative;touch-action:none;cursor:pointer;
+    -webkit-user-select:none;user-select:none;
   }
-  #joy .ring{position:absolute;inset:0;border-radius:50%;border:1px dashed rgba(57,255,20,.15);}
+  #joy.active{border-color:var(--neon);box-shadow:0 0 20px rgba(57,255,20,.25);}
+  #joy .ring{position:absolute;inset:8px;border-radius:50%;border:1px dashed rgba(57,255,20,.2);pointer-events:none;}
   #knob{
-    position:absolute;width:58px;height:58px;border-radius:50%;
+    position:absolute;width:clamp(52px,14vw,72px);height:clamp(52px,14vw,72px);border-radius:50%;
     background:radial-gradient(circle,var(--neon),var(--neon-dim));
-    box-shadow:0 0 14px var(--neon);left:50%;top:50%;
-    transform:translate(-50%,-50%);transition:transform .05s linear;
+    box-shadow:0 0 16px var(--neon);left:50%;top:50%;
+    transform:translate(-50%,-50%);pointer-events:none;
   }
-  .joy-label{font-size:9px;color:var(--text-dim);letter-spacing:.2em;}
-  .dirbig{font-size:22px;font-weight:700;color:var(--neon);min-height:26px;text-shadow:0 0 10px var(--neon);}
+  .joy-label{font-size:10px;color:var(--text-dim);letter-spacing:.2em;}
+  .dirbig{font-size:clamp(18px,5vw,24px);font-weight:700;color:var(--neon);min-height:28px;text-shadow:0 0 10px var(--neon);text-align:center;}
+  /* D-PAD fallback (touch grande) */
+  .dpad{display:grid;grid-template-columns:repeat(3,56px);grid-template-rows:repeat(3,56px);gap:6px;touch-action:none;}
+  .dpad .sp{visibility:hidden;pointer-events:none;}
+  .dpad .pad{
+    font-family:var(--mono);font-size:18px;font-weight:700;color:var(--neon);
+    background:var(--panel);border:2px solid var(--neon-dim);
+    display:grid;place-items:center;cursor:pointer;touch-action:none;
+    -webkit-user-select:none;user-select:none;
+    clip-path:polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,6px 100%,0 calc(100% - 6px));
+  }
+  .dpad .pad:active,.dpad .pad.on{background:var(--neon);color:#000;border-color:var(--neon);box-shadow:0 0 14px var(--neon);}
+  .dpad .pad.stop{font-size:11px;letter-spacing:.05em;}
   /* UTILITY BUTTONS */
-  .utils{display:flex;flex-direction:column;gap:10px;}
+  .utils{display:flex;flex-direction:column;gap:10px;align-items:center;}
   .btn{
     font-family:var(--mono);font-size:12px;letter-spacing:.1em;color:var(--neon);
     background:var(--panel);border:1px solid var(--neon-dim);padding:12px 16px;
@@ -119,7 +136,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="controls">
     <div class="joy-wrap">
       <div id="joy"><div class="ring"></div><div id="knob"></div></div>
-      <div class="joy-label">DRIVE CONTROL</div>
+      <div class="joy-label">ANALOGICO // SEGURE E ARRASTE</div>
+    </div>
+
+    <div class="dpad" id="dpad">
+      <span class="sp"></span><button type="button" class="pad" data-cmd="F">▲</button><span class="sp"></span>
+      <button type="button" class="pad" data-cmd="L">◀</button><button type="button" class="pad stop" data-cmd="S">STOP</button><button type="button" class="pad" data-cmd="R">▶</button>
+      <span class="sp"></span><button type="button" class="pad" data-cmd="B">▼</button><span class="sp"></span>
     </div>
 
     <div class="utils">
@@ -140,103 +163,169 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   "use strict";
   var HOST = window.location.hostname || "192.168.4.1";
   var STREAM_URL = "http://" + HOST + ":81/stream";
-  var WS_URL = "ws://" + HOST + ":82/";
+  var WS_URL = "ws://" + HOST + ":82";
+  var CMD_URL = "http://" + HOST + "/cmd";
 
-  // ---- VIDEO STREAM ----
   var img = document.getElementById("stream");
   img.src = STREAM_URL;
   img.onerror = function(){ setTimeout(function(){ img.src = STREAM_URL + "?t=" + Date.now(); }, 1500); };
 
-  // ---- WEBSOCKET (robust + auto-reconnect) ----
   var ws = null, wsReady = false;
   var dot = document.getElementById("dot");
   var connTxt = document.getElementById("conn-txt");
+  var lastCmdEl = document.getElementById("last-cmd");
+  var dirBig = document.getElementById("dirbig");
+  var DIR_NAME = {F:"FRENTE", B:"TRAS", L:"ESQUERDA", R:"DIREITA", S:"PARADO"};
 
   function connect(){
-    ws = new WebSocket(WS_URL);
+    try { ws = new WebSocket(WS_URL); } catch(e) { wsReady = false; return; }
     ws.onopen = function(){ wsReady = true; dot.classList.add("on"); connTxt.textContent = "ONLINE"; };
-    ws.onclose = function(){ wsReady = false; dot.classList.remove("on"); connTxt.textContent = "OFFLINE"; setTimeout(connect, 1500); };
-    ws.onerror = function(){ try{ ws.close(); }catch(e){} };
+    ws.onclose = function(){ wsReady = false; dot.classList.remove("on"); connTxt.textContent = "HTTP"; setTimeout(connect, 2000); };
+    ws.onerror = function(){ wsReady = false; try{ ws.close(); }catch(e){} };
   }
   connect();
 
-  function send(cmd){
-    if(wsReady && ws.readyState === 1){ ws.send(cmd); }
-  }
-
-  // ---- COMMAND STATE (only send on change) ----
   var lastDir = "S";
-  var lastCmdEl = document.getElementById("last-cmd");
-  var dirBig = document.getElementById("dirbig");
-  var DIR_NAME = {F:"FORWARD", B:"BACKWARD", L:"LEFT", R:"RIGHT", S:"STOP"};
+  var heartbeat = null;
+  var HEARTBEAT_MS = 100;
 
-  function setDir(cmd){
-    if(cmd === lastDir) return;       // <-- anti-flood: só envia quando muda
-    lastDir = cmd;
-    send(cmd);
-    lastCmdEl.textContent = "CMD: " + cmd;
-    dirBig.textContent = DIR_NAME[cmd];
+  function dispatch(cmd){
+    if(wsReady && ws && ws.readyState === 1){
+      try { ws.send(cmd); return; } catch(e) {}
+    }
+    fetch(CMD_URL + "?d=" + encodeURIComponent(cmd), { method:"GET", cache:"no-store", mode:"cors" }).catch(function(){});
   }
 
-  // ---- VIRTUAL JOYSTICK (touch + mouse) ----
+  function highlightPad(cmd){
+    var pads = document.querySelectorAll(".dpad .pad");
+    for(var i=0;i<pads.length;i++){
+      pads[i].classList.toggle("on", pads[i].getAttribute("data-cmd") === cmd && cmd !== "S");
+    }
+  }
+
+  function applyDir(cmd){
+    if(cmd !== lastDir){
+      lastDir = cmd;
+      dispatch(cmd);
+    }
+    lastCmdEl.textContent = "CMD: " + cmd;
+    dirBig.textContent = DIR_NAME[cmd] || cmd;
+    highlightPad(cmd);
+  }
+
+  function startDrive(cmd){
+    applyDir(cmd);
+    if(heartbeat) return;
+    heartbeat = setInterval(function(){
+      if(lastDir !== "S") dispatch(lastDir);
+    }, HEARTBEAT_MS);
+  }
+
+  function stopDrive(){
+    if(heartbeat){ clearInterval(heartbeat); heartbeat = null; }
+    applyDir("S");
+  }
+
   var joy = document.getElementById("joy");
   var knob = document.getElementById("knob");
   var dragging = false;
-  var DEAD_ZONE = 0.28;   // fração do raio antes de ativar
-  var MAX = 60;           // deslocamento máx do knob em px
+  var DEAD = 0.12;
+  var pointerId = null;
 
-  function center(){ var r = joy.getBoundingClientRect(); return {x:r.left + r.width/2, y:r.top + r.height/2}; }
+  function joyCenter(){
+    var r = joy.getBoundingClientRect();
+    return { x: r.left + r.width/2, y: r.top + r.height/2, radius: r.width/2 };
+  }
 
-  function handle(px, py){
-    var c = center();
+  function joyFromPoint(px, py){
+    var c = joyCenter();
     var dx = px - c.x, dy = py - c.y;
     var dist = Math.sqrt(dx*dx + dy*dy);
-    var radius = joy.getBoundingClientRect().width/2;
-    var norm = Math.min(dist / radius, 1);
-
-    // limita o knob visualmente
-    var kx = dx, ky = dy, capped = MAX;
-    if(dist > capped){ var s = capped/dist; kx = dx*s; ky = dy*s; }
+    var maxKnob = c.radius - 20;
+    var kx = dx, ky = dy;
+    if(dist > maxKnob && dist > 0){ var s = maxKnob/dist; kx = dx*s; ky = dy*s; }
     knob.style.transform = "translate(calc(-50% + "+kx+"px), calc(-50% + "+ky+"px))";
 
-    if(norm < DEAD_ZONE){ setDir("S"); return; }
+    var norm = dist / c.radius;
+    if(norm < DEAD){ stopDrive(); return; }
 
-    // angulo: 0 = direita, cresce horário (tela). Convertendo p/ direções
-    var ang = Math.atan2(dy, dx) * 180 / Math.PI; // -180..180
-    if(ang < 0) ang += 360;                        // 0..360
-    // setores de 90° centrados em cada direção
+    var ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    if(ang < 0) ang += 360;
+
     var cmd;
-    if(ang >= 45 && ang < 135)      cmd = "B"; // baixo na tela = ré
-    else if(ang >= 135 && ang < 225) cmd = "L";
-    else if(ang >= 225 && ang < 315) cmd = "F"; // cima = frente
-    else                             cmd = "R";
-    setDir(cmd);
+    if(ang >= 45 && ang < 135)       cmd = "B";
+    else if(ang >= 135 && ang < 225)  cmd = "L";
+    else if(ang >= 225 && ang < 315)  cmd = "F";
+    else                               cmd = "R";
+
+    joy.classList.add("active");
+    startDrive(cmd);
   }
 
-  function release(){
+  function joyRelease(){
     dragging = false;
+    pointerId = null;
+    joy.classList.remove("active");
     knob.style.transform = "translate(-50%,-50%)";
-    setDir("S");
+    stopDrive();
   }
 
-  // touch
-  joy.addEventListener("touchstart", function(e){ dragging = true; handle(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, {passive:false});
-  joy.addEventListener("touchmove", function(e){ if(dragging) handle(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); }, {passive:false});
-  joy.addEventListener("touchend", function(e){ release(); e.preventDefault(); }, {passive:false});
-  joy.addEventListener("touchcancel", release, {passive:false});
-  // mouse
-  joy.addEventListener("mousedown", function(e){ dragging = true; handle(e.clientX, e.clientY); });
-  window.addEventListener("mousemove", function(e){ if(dragging) handle(e.clientX, e.clientY); });
-  window.addEventListener("mouseup", function(){ if(dragging) release(); });
+  joy.addEventListener("pointerdown", function(e){
+    e.preventDefault();
+    dragging = true;
+    pointerId = e.pointerId;
+    joy.setPointerCapture(e.pointerId);
+    joyFromPoint(e.clientX, e.clientY);
+  });
+  joy.addEventListener("pointermove", function(e){
+    if(!dragging || e.pointerId !== pointerId) return;
+    e.preventDefault();
+    joyFromPoint(e.clientX, e.clientY);
+  });
+  joy.addEventListener("pointerup", function(e){
+    if(e.pointerId !== pointerId) return;
+    e.preventDefault();
+    joyRelease();
+  });
+  joy.addEventListener("pointercancel", joyRelease);
 
-  // ---- UTILITY BUTTONS ----
+  var dpad = document.getElementById("dpad");
+  var padPointer = null;
+
+  function bindPad(btn){
+    var cmd = btn.getAttribute("data-cmd");
+    btn.addEventListener("pointerdown", function(e){
+      e.preventDefault();
+      padPointer = e.pointerId;
+      btn.setPointerCapture(e.pointerId);
+      if(cmd === "S") stopDrive();
+      else startDrive(cmd);
+    });
+    btn.addEventListener("pointerup", function(e){
+      if(e.pointerId !== padPointer) return;
+      e.preventDefault();
+      padPointer = null;
+      stopDrive();
+    });
+    btn.addEventListener("pointercancel", function(){
+      padPointer = null;
+      stopDrive();
+    });
+  }
+
+  var pads = dpad.querySelectorAll(".pad");
+  for(var p=0; p<pads.length; p++) bindPad(pads[p]);
+
+  window.addEventListener("blur", stopDrive);
+  document.addEventListener("visibilitychange", function(){ if(document.hidden) stopDrive(); });
+
   var ledOn = false;
   var ledBtn = document.getElementById("btn-led");
-  ledBtn.addEventListener("click", function(){ send("LED"); ledOn = !ledOn; ledBtn.classList.toggle("on", ledOn); });
+  ledBtn.addEventListener("click", function(){ dispatch("LED"); ledOn = !ledOn; ledBtn.classList.toggle("on", ledOn); });
 
-  var turnBtns = document.querySelectorAll(".btn[data-cmd]");
+  var turnBtns = document.querySelectorAll(".utils .btn[data-cmd]");
   for(var i=0;i<turnBtns.length;i++){
-    (function(b){ b.addEventListener("click", function(){ send(b.getAttribute("data-cmd")); }); })(turnBtns[i]);
+    (function(b){ b.addEventListener("click", function(){ dispatch(b.getAttribute("data-cmd")); }); })(turnBtns[i]);
   }
 })();
 </script>
@@ -302,6 +391,11 @@ const int TEMPO_45_GRAUS = 400;
 const int TEMPO_90_GRAUS = 800;
 const int TEMPO_180_GRAUS = 1600;
 
+// Se o ESP32 parar de receber comandos, os motores desligam sozinhos.
+const unsigned long TEMPO_FAILSAFE_MS = 1000;
+unsigned long ultimoComandoMovimentoMs = 0;
+bool motoresEmMovimento = false;
+
 // ==========================================
 // INSTÂNCIAS DOS SERVIDORES
 // ==========================================
@@ -315,32 +409,67 @@ WebSocketsServer webSocket = WebSocketsServer(82); // Servidor de Comandos (Baix
 void pararMotores() {
   digitalWrite(MOTOR_ESQ_IN1, LOW); digitalWrite(MOTOR_ESQ_IN2, LOW);
   digitalWrite(MOTOR_DIR_IN3, LOW); digitalWrite(MOTOR_DIR_IN4, LOW);
+  motoresEmMovimento = false;
 }
 
 void moverFrente() {
   digitalWrite(MOTOR_ESQ_IN1, HIGH); digitalWrite(MOTOR_ESQ_IN2, LOW);
   digitalWrite(MOTOR_DIR_IN3, HIGH); digitalWrite(MOTOR_DIR_IN4, LOW);
+  motoresEmMovimento = true;
 }
 
 void moverTras() {
   digitalWrite(MOTOR_ESQ_IN1, LOW); digitalWrite(MOTOR_ESQ_IN2, HIGH);
   digitalWrite(MOTOR_DIR_IN3, LOW); digitalWrite(MOTOR_DIR_IN4, HIGH);
+  motoresEmMovimento = true;
 }
 
 void girarEsquerda() {
   digitalWrite(MOTOR_ESQ_IN1, LOW); digitalWrite(MOTOR_ESQ_IN2, HIGH);
   digitalWrite(MOTOR_DIR_IN3, HIGH); digitalWrite(MOTOR_DIR_IN4, LOW);
+  motoresEmMovimento = true;
 }
 
 void girarDireita() {
   digitalWrite(MOTOR_ESQ_IN1, HIGH); digitalWrite(MOTOR_ESQ_IN2, LOW);
   digitalWrite(MOTOR_DIR_IN3, LOW); digitalWrite(MOTOR_DIR_IN4, HIGH);
+  motoresEmMovimento = true;
+}
+
+void registrarComandoMovimento() {
+  ultimoComandoMovimentoMs = millis();
+}
+
+void verificarFailsafeMotores() {
+  if (motoresEmMovimento && millis() - ultimoComandoMovimentoMs > TEMPO_FAILSAFE_MS) {
+    pararMotores();
+  }
 }
 
 void realizarGiroSimulado(int tempo) {
+  registrarComandoMovimento();
   girarDireita(); 
   delay(tempo);
   pararMotores();
+}
+
+void executarComando(const String& cmd) {
+  if (cmd == "F" || cmd == "B" || cmd == "L" || cmd == "R") {
+    registrarComandoMovimento();
+  }
+
+  if      (cmd == "F")   moverFrente();
+  else if (cmd == "B")   moverTras();
+  else if (cmd == "L")   girarEsquerda();
+  else if (cmd == "R")   girarDireita();
+  else if (cmd == "S")   pararMotores();
+  else if (cmd == "LED") {
+    lanternaLigada = !lanternaLigada;
+    digitalWrite(PIN_LANTERNA, lanternaLigada ? HIGH : LOW);
+  }
+  else if (cmd == "T45")  realizarGiroSimulado(TEMPO_45_GRAUS);
+  else if (cmd == "T90")  realizarGiroSimulado(TEMPO_90_GRAUS);
+  else if (cmd == "T180") realizarGiroSimulado(TEMPO_180_GRAUS);
 }
 
 // ==========================================
@@ -353,21 +482,10 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t leng
   }
 
   if (type == WStype_TEXT) {
-    String cmd = (char*)payload;
-
-    if      (cmd == "F")   moverFrente();
-    else if (cmd == "B")   moverTras();
-    else if (cmd == "L")   girarEsquerda();
-    else if (cmd == "R")   girarDireita();
-    else if (cmd == "S")   pararMotores();
-
-    else if (cmd == "LED") {
-      lanternaLigada = !lanternaLigada;
-      digitalWrite(PIN_LANTERNA, lanternaLigada ? HIGH : LOW);
-    }
-    else if (cmd == "T45")  realizarGiroSimulado(TEMPO_45_GRAUS);
-    else if (cmd == "T90")  realizarGiroSimulado(TEMPO_90_GRAUS);
-    else if (cmd == "T180") realizarGiroSimulado(TEMPO_180_GRAUS);
+    String cmd;
+    for (size_t i = 0; i < length; i++) cmd += (char)payload[i];
+    cmd.trim();
+    executarComando(cmd);
   }
 }
 
@@ -386,6 +504,7 @@ void stream_handler() {
     // ESSENCIAL: Permite que os outros servidores funcionem enquanto o vídeo transmite!
     server.handleClient();
     webSocket.loop();
+    verificarFailsafeMotores();
 
     camera_fb_t * fb = esp_camera_fb_get();
     if (!fb) {
@@ -466,6 +585,15 @@ void setup() {
   server.on("/", []() {
     server.send_P(200, "text/html", INDEX_HTML);
   });
+  server.on("/cmd", []() {
+    if (!server.hasArg("d")) {
+      server.send(400, "text/plain", "err");
+      return;
+    }
+    executarComando(server.arg("d"));
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "text/plain", "ok");
+  });
   server.begin();
 
   streamServer.on("/stream", stream_handler);
@@ -483,4 +611,5 @@ void loop() {
   server.handleClient();       // Interface Web
   streamServer.handleClient(); // Vídeo
   webSocket.loop();            // Joystick
+  verificarFailsafeMotores();  // Para os motores se o sinal de comando sumir
 }
