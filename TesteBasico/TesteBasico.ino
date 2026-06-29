@@ -1,13 +1,17 @@
 // =========================================================================
-//  TESTE COMPLETO — ROBÔ ESTEIRA (ESP32-CAM)
-//  Valida TUDO junto, mas ainda simples: CÂMERA + LED + MOVIMENTO.
+//  TESTE COMPLETO - ROBO ESTEIRA (ESP32-CAM)
+//  Valida TUDO junto, mas ainda simples: CAMERA + LED + MOVIMENTO.
 //
-//  - Vídeo: stream MJPEG na porta 81 (aparece no topo da página).
-//  - Movimento: botões FRENTE / RÉ / ESQ / DIR / PARAR (HTTP simples).
-//  - LED (flash, GPIO 4): botão liga/desliga.
+//  - Video: stream MJPEG na porta 81 (aparece no topo da pagina).
+//  - Movimento: botoes FRENTE / RE / ESQ / DIR / PARAR (HTTP simples).
+//  - LED (flash, GPIO 4): botao liga/desliga.
 //
-//  HTTP em vez de WebSocket de propósito: é mais simples e robusto pra
-//  teste de campo. Segura o botão = anda; solta = para.
+//  HTTP em vez de WebSocket de proposito: e mais simples e robusto pra
+//  teste de campo. Segura o botao = anda; solta = para.
+//
+//  IMPORTANTE: arquivo todo em ASCII (sem acentos/emoji) de proposito,
+//  pra nao quebrar a raw string R"HTML(...)" se o editor/OneDrive mexer
+//  no encoding do arquivo.
 //
 //  Veja TesteBasico/INSTRUCOES.md para o passo a passo e a tabela de feedback.
 // =========================================================================
@@ -16,14 +20,14 @@
 #include <WebServer.h>
 #include "esp_camera.h"
 
-// ---- Rede (Access Point: o ESP cria o próprio Wi-Fi) -------------------
+// ---- Rede (Access Point: o ESP cria o proprio Wi-Fi) -------------------
 const char* ssid     = "ROBO_TESTE";
-const char* password = "12345678";     // mín. 8 caracteres
+const char* password = "12345678";     // min. 8 caracteres
 IPAddress local_ip(192, 168, 4, 1);
 IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-// ---- Pinos da ponte H L298N (iguais ao código definitivo) --------------
+// ---- Pinos da ponte H L298N (iguais ao codigo definitivo) --------------
 //  ESQUERDO: IN1=14, IN2=2     DIREITO: IN3=13, IN4=15
 #define MOTOR_ESQ_IN1 14
 #define MOTOR_ESQ_IN2  2
@@ -34,7 +38,7 @@ IPAddress subnet(255, 255, 255, 0);
 #define PIN_LED 4
 bool ledLigado = false;
 
-// ---- Pinos da Câmera (Modelo AI-Thinker) -------------------------------
+// ---- Pinos da Camera (Modelo AI-Thinker) -------------------------------
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -52,8 +56,8 @@ bool ledLigado = false;
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-WebServer server(80);         // página + comandos
-WebServer streamServer(81);   // vídeo MJPEG
+WebServer server(80);         // pagina + comandos
+WebServer streamServer(81);   // video MJPEG
 
 // =========================================================================
 //  MOVIMENTO
@@ -80,7 +84,7 @@ void girarDireita() {
 }
 
 // =========================================================================
-//  PÁGINA HTML (vídeo + botões grandes)
+//  PAGINA HTML (video + botoes grandes)
 // =========================================================================
 const char PAGINA[] PROGMEM = R"HTML(
 <!DOCTYPE html><html lang="pt-BR"><head>
@@ -106,37 +110,37 @@ const char PAGINA[] PROGMEM = R"HTML(
   .led.on{background:#ffaa00;color:#000;}
   #log{margin-top:10px;font-size:13px;color:#9fd;min-height:18px;}
 </style></head><body>
-  <h1>TESTE ROBÔ — CÂMERA + MOVIMENTO</h1>
-  <div class="sub">O vídeo deve aparecer abaixo. Segure um botão pra andar.</div>
+  <h1>TESTE ROBO - CAMERA + MOVIMENTO</h1>
+  <div class="sub">O video deve aparecer abaixo. Segure um botao pra andar.</div>
 
   <img id="cam" alt="VIDEO">
 
   <div class="grid">
     <div></div>
-    <button ontouchstart="cmd('F')" onmousedown="cmd('F')">▲<br>FRENTE</button>
+    <button ontouchstart="cmd('F')" onmousedown="cmd('F')">FRENTE</button>
     <div></div>
 
-    <button ontouchstart="cmd('L')" onmousedown="cmd('L')">◄<br>ESQ</button>
-    <button class="stop" onclick="cmd('S')">■<br>PARAR</button>
-    <button ontouchstart="cmd('R')" onmousedown="cmd('R')">►<br>DIR</button>
+    <button ontouchstart="cmd('L')" onmousedown="cmd('L')">ESQ</button>
+    <button class="stop" onclick="cmd('S')">PARAR</button>
+    <button ontouchstart="cmd('R')" onmousedown="cmd('R')">DIR</button>
 
     <div></div>
-    <button ontouchstart="cmd('B')" onmousedown="cmd('B')">▼<br>RÉ</button>
+    <button ontouchstart="cmd('B')" onmousedown="cmd('B')">RE</button>
     <div></div>
 
-    <button id="btnled" class="wide led" onclick="toggleLed()">💡 LIGAR / DESLIGAR LED</button>
+    <button id="btnled" class="wide led" onclick="toggleLed()">LIGAR / DESLIGAR LED</button>
   </div>
 
-  <div id="log">conectando vídeo...</div>
+  <div id="log">conectando video...</div>
 
 <script>
   var HOST = location.hostname || "192.168.4.1";
 
-  // ---- vídeo (stream MJPEG na porta 81) ----
+  // ---- video (stream MJPEG na porta 81) ----
   var cam = document.getElementById('cam');
   function startCam(){ cam.src = "http://" + HOST + ":81/stream?t=" + Date.now(); }
-  cam.onload  = function(){ log('vídeo OK'); };
-  cam.onerror = function(){ log('vídeo falhou — tentando de novo'); setTimeout(startCam, 1500); };
+  cam.onload  = function(){ log('video OK'); };
+  cam.onerror = function(){ log('video falhou - tentando de novo'); setTimeout(startCam, 1500); };
   startCam();
 
   // ---- comandos ----
@@ -157,7 +161,7 @@ const char PAGINA[] PROGMEM = R"HTML(
 
   function log(t){ document.getElementById('log').textContent = t; }
 
-  // ao soltar um botão de direção, manda PARAR
+  // ao soltar um botao de direcao, manda PARAR
   document.querySelectorAll('.grid button').forEach(function(b){
     if(b.classList.contains('stop') || b.id === 'btnled') return;
     b.addEventListener('touchend', parar);
@@ -169,7 +173,7 @@ const char PAGINA[] PROGMEM = R"HTML(
 )HTML";
 
 // =========================================================================
-//  STREAM DE VÍDEO (porta 81)
+//  STREAM DE VIDEO (porta 81)
 // =========================================================================
 void stream_handler() {
   WiFiClient client = streamServer.client();
@@ -180,7 +184,7 @@ void stream_handler() {
   client.print(head);
 
   while (client.connected()) {
-    // mantém a página/comandos respondendo enquanto transmite vídeo
+    // mantem a pagina/comandos respondendo enquanto transmite video
     server.handleClient();
 
     camera_fb_t * fb = esp_camera_fb_get();
@@ -211,7 +215,7 @@ void rotaComando(const char* nome, void (*acao)()) {
 void setup() {
   Serial.begin(115200);
 
-  // Pinos dos motores: OUTPUT + LOW logo de cara (GPIO 2 e 15 são strapping).
+  // Pinos dos motores: OUTPUT + LOW logo de cara (GPIO 2 e 15 sao strapping).
   pinMode(MOTOR_ESQ_IN1, OUTPUT);
   pinMode(MOTOR_ESQ_IN2, OUTPUT);
   pinMode(MOTOR_DIR_IN3, OUTPUT);
@@ -220,7 +224,7 @@ void setup() {
   pararMotores();
   digitalWrite(PIN_LED, LOW);
 
-  // ---- Câmera (config padrão AI-Thinker, igual ao código definitivo) ----
+  // ---- Camera (config padrao AI-Thinker, igual ao codigo definitivo) ----
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer   = LEDC_TIMER_0;
@@ -234,7 +238,7 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_CIF;  // 400x296 — leve, bom pra AP
+  config.frame_size   = FRAMESIZE_CIF;  // 400x296 - leve, bom pra AP
   config.jpeg_quality = 12;             // menor = melhor qualidade (10..63)
   config.fb_count     = 2;
 
