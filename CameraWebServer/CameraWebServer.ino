@@ -110,6 +110,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   }
   .btn:active{background:var(--neon);color:#000;box-shadow:0 0 12px var(--neon);}
   .btn.led.on{background:var(--amber);color:#000;border-color:var(--amber);box-shadow:0 0 12px var(--amber);}
+  .btn.cam.on{background:var(--neon);color:#000;border-color:var(--neon);box-shadow:0 0 12px var(--neon);}
+  .viewport.off img{display:none;}
+  .viewport .camoff{position:absolute;inset:0;display:none;place-items:center;color:var(--text-dim);font-size:11px;letter-spacing:.2em;}
+  .viewport.off .camoff{display:grid;}
   .turn-row{display:flex;gap:8px;}
   .turn-row .btn{min-width:0;flex:1;padding:12px 8px;}
   footer{padding:6px;text-align:center;font-size:9px;color:var(--text-dim);letter-spacing:.2em;border-top:1px solid var(--border);z-index:2;}
@@ -122,8 +126,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </header>
 
 <main>
-  <div class="viewport">
+  <div class="viewport off" id="viewport">
     <img id="stream" src="" alt="VIDEO FEED">
+    <div class="camoff">CAMERA OFF // APERTE CAM</div>
     <span class="corner tl"></span><span class="corner tr"></span>
     <span class="corner bl"></span><span class="corner br"></span>
     <div class="reticle"></div>
@@ -146,6 +151,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="utils">
+      <button class="btn cam" id="btn-cam">📷 CAM ON</button>
       <button class="btn led" id="btn-led">◉ FLASH</button>
       <div class="turn-row">
         <button class="btn" data-cmd="T45">45°</button>
@@ -167,8 +173,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   var CMD_URL = "http://" + HOST + "/cmd";
 
   var img = document.getElementById("stream");
-  img.src = STREAM_URL;
-  img.onerror = function(){ setTimeout(function(){ img.src = STREAM_URL + "?t=" + Date.now(); }, 1500); };
+  var viewport = document.getElementById("viewport");
+  var camOn = false;
+  img.onerror = function(){ if(camOn) setTimeout(function(){ img.src = STREAM_URL + "?t=" + Date.now(); }, 1500); };
 
   var ws = null, wsReady = false;
   var dot = document.getElementById("dot");
@@ -323,6 +330,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   var ledBtn = document.getElementById("btn-led");
   ledBtn.addEventListener("click", function(){ dispatch("LED"); ledOn = !ledOn; ledBtn.classList.toggle("on", ledOn); });
 
+  var camBtn = document.getElementById("btn-cam");
+  camBtn.addEventListener("click", function(){
+    camOn = !camOn;
+    dispatch(camOn ? "CAM1" : "CAM0");
+    camBtn.classList.toggle("on", camOn);
+    camBtn.textContent = camOn ? "📷 CAM OFF" : "📷 CAM ON";
+    viewport.classList.toggle("off", !camOn);
+    if(camOn){ setTimeout(function(){ img.src = STREAM_URL + "?t=" + Date.now(); }, 1200); }
+    else { img.src = ""; }
+  });
+
   var turnBtns = document.querySelectorAll(".utils .btn[data-cmd]");
   for(var i=0;i<turnBtns.length;i++){
     (function(b){ b.addEventListener("click", function(){ dispatch(b.getAttribute("data-cmd")); }); })(turnBtns[i]);
@@ -371,6 +389,10 @@ IPAddress subnet(255, 255, 255, 0);
 // Flash LED
 #define PIN_LANTERNA 4
 bool lanternaLigada = false;
+
+// Camera comeca DESLIGADA: com ela off o loop roda livre e o joystick
+// responde no minimo de latencia. Liga sob demanda pelo botao CAM.
+bool cameraLigada = false;
 
 // Pinos da Câmera (Modelo AI-Thinker)
 #define PWDN_GPIO_NUM     32
@@ -459,6 +481,51 @@ void realizarGiroSimulado(int tempo) {
   pararMotores();
 }
 
+bool iniciarCamera() {
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size = FRAMESIZE_CIF;
+  config.jpeg_quality = 12;
+  config.fb_count = 2;
+  return esp_camera_init(&config) == ESP_OK;
+}
+
+void ligarCamera() {
+  if (cameraLigada) return;
+  if (iniciarCamera()) {
+    cameraLigada = true;
+    Serial.println("Camera LIGADA");
+  } else {
+    Serial.println("Falha ao ligar camera");
+  }
+}
+
+void desligarCamera() {
+  if (!cameraLigada) return;
+  esp_camera_deinit();
+  cameraLigada = false;
+  Serial.println("Camera DESLIGADA");
+}
+
 void executarComando(const String& cmd) {
   if (cmd == "F" || cmd == "B" || cmd == "L" || cmd == "R") {
     registrarComandoMovimento();
@@ -473,6 +540,8 @@ void executarComando(const String& cmd) {
     lanternaLigada = !lanternaLigada;
     digitalWrite(PIN_LANTERNA, lanternaLigada ? HIGH : LOW);
   }
+  else if (cmd == "CAM1") ligarCamera();
+  else if (cmd == "CAM0") desligarCamera();
   else if (cmd == "T45")  realizarGiroSimulado(TEMPO_45_GRAUS);
   else if (cmd == "T90")  realizarGiroSimulado(TEMPO_90_GRAUS);
   else if (cmd == "T180") realizarGiroSimulado(TEMPO_180_GRAUS);
@@ -501,12 +570,17 @@ void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t leng
 void stream_handler() {
   WiFiClient client = streamServer.client();
 
+  if (!cameraLigada) {
+    client.print("HTTP/1.1 503 Service Unavailable\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 0\r\n\r\n");
+    return;
+  }
+
   String head = "HTTP/1.1 200 OK\r\n";
   head += "Access-Control-Allow-Origin: *\r\n";
   head += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
   client.print(head);
 
-  while (client.connected()) {
+  while (client.connected() && cameraLigada) {
     // ESSENCIAL: o stream é um loop infinito que prende o programa aqui dentro.
     // Sem rodar TODOS os servidores neste laço, o joystick (WebSocket :82) e a
     // própria página (:80) ficam sem resposta enquanto o vídeo transmite —
@@ -559,39 +633,6 @@ void setup() {
   pinMode(PIN_LANTERNA, OUTPUT);
   pararMotores();
   digitalWrite(PIN_LANTERNA, LOW);
-
-  // Configuração da Câmera
-  camera_config_t config;
-  config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer = LEDC_TIMER_0;
-  config.pin_d0 = Y2_GPIO_NUM;
-  config.pin_d1 = Y3_GPIO_NUM;
-  config.pin_d2 = Y4_GPIO_NUM;
-  config.pin_d3 = Y5_GPIO_NUM;
-  config.pin_d4 = Y6_GPIO_NUM;
-  config.pin_d5 = Y7_GPIO_NUM;
-  config.pin_d6 = Y8_GPIO_NUM;
-  config.pin_d7 = Y9_GPIO_NUM;
-  config.pin_xclk = XCLK_GPIO_NUM;
-  config.pin_pclk = PCLK_GPIO_NUM;
-  config.pin_vsync = VSYNC_GPIO_NUM;
-  config.pin_href = HREF_GPIO_NUM;
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
-  config.pin_pwdn = PWDN_GPIO_NUM;
-  config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
-  
-  // CIF é o ideal para fluidez e estabilidade em AP
-  config.frame_size = FRAMESIZE_CIF;
-  config.jpeg_quality = 12; 
-  config.fb_count = 2; 
-
-  if (esp_camera_init(&config) != ESP_OK) {
-    Serial.println("Erro ao iniciar a câmera!");
-    return;
-  }
 
   // Configuração Wi-Fi (Modo AP Fixo)
   WiFi.mode(WIFI_AP);
