@@ -1,40 +1,21 @@
-// =========================================================================
-//  TESTE COMPLETO — ROBÔ ESTEIRA (ESP32-CAM)
-//  Valida TUDO junto, mas ainda simples: CÂMERA + LED + MOVIMENTO.
-//
-//  - Vídeo: stream MJPEG na porta 81 (aparece no topo da página).
-//  - Movimento: botões FRENTE / RÉ / ESQ / DIR / PARAR (HTTP simples).
-//  - LED (flash, GPIO 4): botão liga/desliga.
-//
-//  HTTP em vez de WebSocket de propósito: é mais simples e robusto pra
-//  teste de campo. Segura o botão = anda; solta = para.
-//
-//  Veja TesteBasico/INSTRUCOES.md para o passo a passo e a tabela de feedback.
-// =========================================================================
-
 #include <WiFi.h>
 #include <WebServer.h>
 #include "esp_camera.h"
 
-// ---- Rede (Access Point: o ESP cria o próprio Wi-Fi) -------------------
 const char* ssid     = "ROBO_TESTE";
-const char* password = "12345678";     // mín. 8 caracteres
+const char* password = "12345678";
 IPAddress local_ip(192, 168, 4, 1);
 IPAddress gateway(192, 168, 4, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-// ---- Pinos da ponte H L298N (iguais ao código definitivo) --------------
-//  ESQUERDO: IN1=14, IN2=2     DIREITO: IN3=13, IN4=15
-#define MOTOR_ESQ_IN1 14
-#define MOTOR_ESQ_IN2  2
-#define MOTOR_DIR_IN3 13
+#define MOTOR_ESQ_IN1  2
+#define MOTOR_ESQ_IN2 13
+#define MOTOR_DIR_IN3 14
 #define MOTOR_DIR_IN4 15
 
-// ---- LED de flash ------------------------------------------------------
 #define PIN_LED 4
 bool ledLigado = false;
 
-// ---- Pinos da Câmera (Modelo AI-Thinker) -------------------------------
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
@@ -52,12 +33,9 @@ bool ledLigado = false;
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-WebServer server(80);         // página + comandos
-WebServer streamServer(81);   // vídeo MJPEG
+WebServer server(80);
+WebServer streamServer(81);
 
-// =========================================================================
-//  MOVIMENTO
-// =========================================================================
 void pararMotores() {
   digitalWrite(MOTOR_ESQ_IN1, LOW); digitalWrite(MOTOR_ESQ_IN2, LOW);
   digitalWrite(MOTOR_DIR_IN3, LOW); digitalWrite(MOTOR_DIR_IN4, LOW);
@@ -79,9 +57,6 @@ void girarDireita() {
   digitalWrite(MOTOR_DIR_IN3, LOW); digitalWrite(MOTOR_DIR_IN4, HIGH);
 }
 
-// =========================================================================
-//  PÁGINA HTML (vídeo + botões grandes)
-// =========================================================================
 const char PAGINA[] PROGMEM = R"HTML(
 <!DOCTYPE html><html lang="pt-BR"><head>
 <meta charset="UTF-8">
@@ -106,58 +81,54 @@ const char PAGINA[] PROGMEM = R"HTML(
   .led.on{background:#ffaa00;color:#000;}
   #log{margin-top:10px;font-size:13px;color:#9fd;min-height:18px;}
 </style></head><body>
-  <h1>TESTE ROBÔ — CÂMERA + MOVIMENTO</h1>
-  <div class="sub">O vídeo deve aparecer abaixo. Segure um botão pra andar.</div>
+  <h1>TESTE ROBO - CAMERA + MOVIMENTO</h1>
+  <div class="sub">O video deve aparecer abaixo. Segure um botao pra andar.</div>
 
   <img id="cam" alt="VIDEO">
 
   <div class="grid">
     <div></div>
-    <button ontouchstart="cmd('F')" onmousedown="cmd('F')">▲<br>FRENTE</button>
+    <button ontouchstart="cmd('F')" onmousedown="cmd('F')">FRENTE</button>
     <div></div>
 
-    <button ontouchstart="cmd('L')" onmousedown="cmd('L')">◄<br>ESQ</button>
-    <button class="stop" onclick="cmd('S')">■<br>PARAR</button>
-    <button ontouchstart="cmd('R')" onmousedown="cmd('R')">►<br>DIR</button>
+    <button ontouchstart="cmd('L')" onmousedown="cmd('L')">ESQ</button>
+    <button class="stop" onclick="cmd('S')">PARAR</button>
+    <button ontouchstart="cmd('R')" onmousedown="cmd('R')">DIR</button>
 
     <div></div>
-    <button ontouchstart="cmd('B')" onmousedown="cmd('B')">▼<br>RÉ</button>
+    <button ontouchstart="cmd('B')" onmousedown="cmd('B')">RE</button>
     <div></div>
 
-    <button id="btnled" class="wide led" onclick="toggleLed()">💡 LIGAR / DESLIGAR LED</button>
+    <button id="btnled" class="wide led" onclick="toggleLed()">LIGAR / DESLIGAR LED</button>
   </div>
 
-  <div id="log">conectando vídeo...</div>
+  <div id="log">conectando video...</div>
 
 <script>
   var HOST = location.hostname || "192.168.4.1";
 
-  // ---- vídeo (stream MJPEG na porta 81) ----
   var cam = document.getElementById('cam');
-  function startCam(){ cam.src = "http://" + HOST + ":81/stream?t=" + Date.now(); }
-  cam.onload  = function(){ log('vídeo OK'); };
-  cam.onerror = function(){ log('vídeo falhou — tentando de novo'); setTimeout(startCam, 1500); };
+  var startCam = function(){ cam.src = "http://" + HOST + ":81/stream?t=" + Date.now(); };
+  cam.onload  = function(){ log('video OK'); };
+  cam.onerror = function(){ log('video falhou - tentando de novo'); setTimeout(startCam, 1500); };
   startCam();
 
-  // ---- comandos ----
-  function cmd(c){
+  var cmd = function(c){
     fetch('/'+c).then(function(){ log('OK: '+c); }).catch(function(){ log('FALHOU: '+c); });
-  }
-  function parar(){ cmd('S'); }
+  };
+  var parar = function(){ cmd('S'); };
 
-  // ---- LED ----
   var ledOn = false;
-  function toggleLed(){
+  var toggleLed = function(){
     fetch('/LED').then(function(){
       ledOn = !ledOn;
       document.getElementById('btnled').classList.toggle('on', ledOn);
       log('LED: ' + (ledOn ? 'ON' : 'OFF'));
     }).catch(function(){ log('FALHOU: LED'); });
-  }
+  };
 
-  function log(t){ document.getElementById('log').textContent = t; }
+  var log = function(t){ document.getElementById('log').textContent = t; };
 
-  // ao soltar um botão de direção, manda PARAR
   document.querySelectorAll('.grid button').forEach(function(b){
     if(b.classList.contains('stop') || b.id === 'btnled') return;
     b.addEventListener('touchend', parar);
@@ -168,9 +139,6 @@ const char PAGINA[] PROGMEM = R"HTML(
 </body></html>
 )HTML";
 
-// =========================================================================
-//  STREAM DE VÍDEO (porta 81)
-// =========================================================================
 void stream_handler() {
   WiFiClient client = streamServer.client();
 
@@ -180,7 +148,6 @@ void stream_handler() {
   client.print(head);
 
   while (client.connected()) {
-    // mantém a página/comandos respondendo enquanto transmite vídeo
     server.handleClient();
 
     camera_fb_t * fb = esp_camera_fb_get();
@@ -199,9 +166,6 @@ void stream_handler() {
   }
 }
 
-// =========================================================================
-//  ROTAS DE COMANDO
-// =========================================================================
 void rotaComando(const char* nome, void (*acao)()) {
   acao();
   server.send(200, "text/plain", nome);
@@ -211,7 +175,6 @@ void rotaComando(const char* nome, void (*acao)()) {
 void setup() {
   Serial.begin(115200);
 
-  // Pinos dos motores: OUTPUT + LOW logo de cara (GPIO 2 e 15 são strapping).
   pinMode(MOTOR_ESQ_IN1, OUTPUT);
   pinMode(MOTOR_ESQ_IN2, OUTPUT);
   pinMode(MOTOR_DIR_IN3, OUTPUT);
@@ -220,7 +183,6 @@ void setup() {
   pararMotores();
   digitalWrite(PIN_LED, LOW);
 
-  // ---- Câmera (config padrão AI-Thinker, igual ao código definitivo) ----
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer   = LEDC_TIMER_0;
@@ -234,8 +196,8 @@ void setup() {
   config.pin_pwdn = PWDN_GPIO_NUM;   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_CIF;  // 400x296 — leve, bom pra AP
-  config.jpeg_quality = 12;             // menor = melhor qualidade (10..63)
+  config.frame_size   = FRAMESIZE_CIF;
+  config.jpeg_quality = 12;
   config.fb_count     = 2;
 
   if (esp_camera_init(&config) != ESP_OK) {
@@ -244,7 +206,6 @@ void setup() {
     Serial.println("Camera OK.");
   }
 
-  // ---- Wi-Fi (Access Point) ----
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(local_ip, gateway, subnet);
   WiFi.softAP(ssid, password);
@@ -254,7 +215,6 @@ void setup() {
   Serial.print("\" (senha "); Serial.print(password);
   Serial.print(") e abra: http://"); Serial.println(WiFi.softAPIP());
 
-  // ---- Rotas ----
   server.on("/", []() { server.send_P(200, "text/html", PAGINA); });
   server.on("/F", []() { rotaComando("F (frente)",   moverFrente);   });
   server.on("/B", []() { rotaComando("B (re)",        moverTras);     });

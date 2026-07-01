@@ -131,3 +131,35 @@ ou ela **congela/trava** quando o robô anda? Esse é o ponto-chave deste teste.
 
 Com essa tabela eu monto o **código definitivo** já ajustado (resolução da câmera,
 FPS, etc.). 🚀
+
+---
+
+## 🛠️ Notas técnicas (pra não esquecer)
+
+### Bug: `error: 'function' does not name a type; did you mean 'union'?`
+
+**Sintoma:** ao compilar, erro apontando pra uma linha de JavaScript dentro do HTML
+(ex: `function cmd(c){`). Parece erro de C++, mas é JavaScript.
+
+**Causa REAL:** o pré-processador do Arduino gera protótipos de função automáticos e
+**não respeita a raw string `R"HTML(...)"`**. Ele lê o `function nome(){` do
+JavaScript embutido e cria um protótipo C++ inválido (`function nome(args);`) no topo
+do arquivo. O erro aponta pra linha do JS, mas o problema é o protótipo gerado.
+
+**NÃO é** encoding, BOM, nem `R"HTML(` quebrado (isso já foi descartado byte-a-byte).
+
+**Correção:** declarar as funções JavaScript como expressão, não declaração:
+
+```
+// quebra a compilação:
+function cmd(c){ ... }
+
+// forma correta:
+var cmd = function(c){ ... };
+```
+
+Funciona igual no navegador. Detalhe: expressão `var` precisa de `;` no fim e não
+sofre hoisting (não chamar a função antes da linha onde ela é declarada).
+
+Confirmado compilando de verdade com `arduino-cli` (FQBN `esp32:esp32:esp32cam`,
+core esp32 3.3.10) — exit code 0. O mesmo padrão foi corrigido no `CameraWebServer`.

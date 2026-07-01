@@ -177,33 +177,33 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   var dirBig = document.getElementById("dirbig");
   var DIR_NAME = {F:"FRENTE", B:"TRAS", L:"ESQUERDA", R:"DIREITA", S:"PARADO"};
 
-  function connect(){
+  var connect = function(){
     try { ws = new WebSocket(WS_URL); } catch(e) { wsReady = false; return; }
     ws.onopen = function(){ wsReady = true; dot.classList.add("on"); connTxt.textContent = "ONLINE"; };
     ws.onclose = function(){ wsReady = false; dot.classList.remove("on"); connTxt.textContent = "HTTP"; setTimeout(connect, 2000); };
     ws.onerror = function(){ wsReady = false; try{ ws.close(); }catch(e){} };
-  }
+  };
   connect();
 
   var lastDir = "S";
   var heartbeat = null;
   var HEARTBEAT_MS = 100;
 
-  function dispatch(cmd){
+  var dispatch = function(cmd){
     if(wsReady && ws && ws.readyState === 1){
       try { ws.send(cmd); return; } catch(e) {}
     }
     fetch(CMD_URL + "?d=" + encodeURIComponent(cmd), { method:"GET", cache:"no-store", mode:"cors" }).catch(function(){});
-  }
+  };
 
-  function highlightPad(cmd){
+  var highlightPad = function(cmd){
     var pads = document.querySelectorAll(".dpad .pad");
     for(var i=0;i<pads.length;i++){
       pads[i].classList.toggle("on", pads[i].getAttribute("data-cmd") === cmd && cmd !== "S");
     }
-  }
+  };
 
-  function applyDir(cmd){
+  var applyDir = function(cmd){
     if(cmd !== lastDir){
       lastDir = cmd;
       dispatch(cmd);
@@ -211,20 +211,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     lastCmdEl.textContent = "CMD: " + cmd;
     dirBig.textContent = DIR_NAME[cmd] || cmd;
     highlightPad(cmd);
-  }
+  };
 
-  function startDrive(cmd){
+  var startDrive = function(cmd){
     applyDir(cmd);
     if(heartbeat) return;
     heartbeat = setInterval(function(){
       if(lastDir !== "S") dispatch(lastDir);
     }, HEARTBEAT_MS);
-  }
+  };
 
-  function stopDrive(){
+  var stopDrive = function(){
     if(heartbeat){ clearInterval(heartbeat); heartbeat = null; }
     applyDir("S");
-  }
+  };
 
   var joy = document.getElementById("joy");
   var knob = document.getElementById("knob");
@@ -232,12 +232,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   var DEAD = 0.12;
   var pointerId = null;
 
-  function joyCenter(){
+  var joyCenter = function(){
     var r = joy.getBoundingClientRect();
     return { x: r.left + r.width/2, y: r.top + r.height/2, radius: r.width/2 };
-  }
+  };
 
-  function joyFromPoint(px, py){
+  var joyFromPoint = function(px, py){
     var c = joyCenter();
     var dx = px - c.x, dy = py - c.y;
     var dist = Math.sqrt(dx*dx + dy*dy);
@@ -260,15 +260,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     joy.classList.add("active");
     startDrive(cmd);
-  }
+  };
 
-  function joyRelease(){
+  var joyRelease = function(){
     dragging = false;
     pointerId = null;
     joy.classList.remove("active");
     knob.style.transform = "translate(-50%,-50%)";
     stopDrive();
-  }
+  };
 
   joy.addEventListener("pointerdown", function(e){
     e.preventDefault();
@@ -292,7 +292,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   var dpad = document.getElementById("dpad");
   var padPointer = null;
 
-  function bindPad(btn){
+  var bindPad = function(btn){
     var cmd = btn.getAttribute("data-cmd");
     btn.addEventListener("pointerdown", function(e){
       e.preventDefault();
@@ -311,7 +311,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       padPointer = null;
       stopDrive();
     });
-  }
+  };
 
   var pads = dpad.querySelectorAll(".pad");
   for(var p=0; p<pads.length; p++) bindPad(pads[p]);
@@ -363,10 +363,10 @@ IPAddress subnet(255, 255, 255, 0);
  * Assim os 4 sentidos ficam corretos de uma vez. (GPIO 15 continua sendo IN3
  * fisicamente; só a associação no software é que foi trocada.)
  */
-#define MOTOR_ESQ_IN1 14
-#define MOTOR_ESQ_IN2  2
-#define MOTOR_DIR_IN3 13   // <- invertido (era GPIO 15) p/ corrigir cabeamento do motor direito
-#define MOTOR_DIR_IN4 15   // <- invertido (era GPIO 13)
+#define MOTOR_ESQ_IN1  2
+#define MOTOR_ESQ_IN2 13
+#define MOTOR_DIR_IN3 14
+#define MOTOR_DIR_IN4 15
 
 // Flash LED
 #define PIN_LANTERNA 4
@@ -513,11 +513,8 @@ void stream_handler() {
     // foi essa a causa do "joystick travado". webSocket.loop() em especial
     // precisa rodar a cada iteração para entregar os comandos de movimento.
     webSocket.loop();
-<<<<<<< HEAD
-    verificarFailsafeMotores();
-=======
     server.handleClient();
->>>>>>> 0d9b74eee8c7443390a057c87862c114d7e25172
+    verificarFailsafeMotores();
 
     camera_fb_t * fb = esp_camera_fb_get();
     if (!fb) {
